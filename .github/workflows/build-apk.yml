@@ -1,0 +1,74 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'yo-party.zip'
+      - '.github/workflows/build-apk.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: कोड डाउनलोड करें
+        uses: actions/checkout@v4
+
+      - name: Java 17 सेट करें
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: ZIP extract करें
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p extracted
+          unzip -q yo-party.zip -d extracted
+          echo 'ZIP में मिली फ़ाइलें:'
+          find extracted -maxdepth 5 -type f | sort | sed -n '1,200p'
+
+      - name: Android project खोजें
+        id: project
+        shell: bash
+        run: |
+          set -euo pipefail
+          wrapper="$(find extracted -type f -name gradlew -print -quit || true)"
+          if [ -n "$wrapper" ]; then
+            root="$(dirname "$wrapper")"
+          else
+            settings="$(find extracted -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit || true)"
+            root="$(dirname "$settings")"
+          fi
+          if [ -z "$root" ] || [ "$root" = "." ] || [ ! -d "$root" ]; then
+            echo 'yo-party.zip में Android Gradle project नहीं मिला।'
+            echo 'ZIP में gradlew और settings.gradle/settings.gradle.kts आवश्यक हैं।'
+            exit 1
+          fi
+          echo "root=$root" >> "$GITHUB_OUTPUT"
+          echo "Project root: $root"
+
+      - name: Debug APK बनाएं
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${{ steps.project.outputs.root }}"
+          if [ ! -f gradlew ]; then
+            echo 'gradlew फ़ाइल नहीं मिली।'
+            exit 1
+          fi
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      - name: APK artifact अपलोड करें
+        uses: actions/upload-artifact@v4
+        with:
+          name: yo-party-debug-apk
+          path: '**/build/outputs/apk/**/*.apk'
+          if-no-files-found: error
